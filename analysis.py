@@ -1,6 +1,8 @@
 # analysis.py
 # All ML heavy-lifting: DR, clustering, purity, feature importance, genre classifier.
 
+from collections import Counter
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -179,36 +181,56 @@ def train_genre_classifier(_X, _df, target_genre, _feature_names_tuple):
 
     return clf, accuracy, precision, recall, importance, (y_test, y_pred)
 
-def compare_silhouette_with_genres(X, computed_labels, df):
+
+def compare_silhouette_with_top_genres(X, computed_labels, df, n_clusters):
     """
-    Compute silhouette for computed clusters vs. genre-based pseudo-clusters.
+    Compute silhouette for computed clusters vs. top (n-1) genres + 'Other' pseudo-clusters.
     - X: Feature matrix.
-    - computed_labels: Array of cluster labels from your ML.
-    - df: DataFrame with 'genres' column (list of strings).
-    Returns: dict with scores.
+    - computed_labels: Array of cluster labels.
+    - df: DataFrame with 'genres' (list of strings).
+    - n_clusters: The number of clusters (from params['n_clusters']).
+    Returns: dict with scores or None if invalid.
     """
-    # Step 1: For computed clusters (ignore noise labels like -1 in DBSCAN)
+    if n_clusters < 2:
+        return None  # Invalid for comparison
+    
+    # Step 1: Compute silhouette for computed clusters (filter noise)
     valid_idx = computed_labels != -1
     if np.sum(valid_idx) < 2:
         computed_sil = None
     else:
         computed_sil = silhouette_score(X[valid_idx], computed_labels[valid_idx])
     
-    # Step 2: Create genre-based labels (handle multi-label by taking first genre)
-    df['primary_genre'] = df['genres'].apply(lambda g: g[0] if isinstance(g, list) and g else 'Unknown')
+    # Step 2: Find top (n-1) genres by frequency
+    all_genres = [genre for genres in df['genres'] if isinstance(genres, list) for genre in genres]
+    genre_counts = Counter(all_genres)
+    top_genres = [genre for genre, _ in genre_counts.most_common(n_clusters - 1)]
+    top_set = set(top_genres)  # For fast lookup
     
-    # Step 3: Encode to numeric labels
+    # Step 3: Assign each game to first matching top genre or 'Other'
+    def assign_genre_cluster(genres):
+        if not isinstance(genres, list):
+            return 'Other'
+        for genre in genres:
+            if genre in top_set:
+                return genre
+        return 'Other'
+    
+    df['genre_cluster'] = df['genres'].apply(assign_genre_cluster)
+    
+    # Step 4: Encode to numeric labels (including 'Other')
     le = LabelEncoder()
-    genre_labels = le.fit_transform(df['primary_genre'])
+    genre_labels = le.fit_transform(df['genre_cluster'])
     
-    # Step 4: Compute silhouette for genre labels (no noise to filter)
+    # Step 5: Compute silhouette for genre-based labels
     genre_sil = silhouette_score(X, genre_labels)
     
-    # Step 5: Compare and return results
+    # Step 6: Compare and return
     better = 'Computed' if (computed_sil is not None and computed_sil > genre_sil) else 'Genre-based' if genre_sil > (computed_sil or -float('inf')) else 'Equal'
     result = {
         'computed_silhouette': computed_sil,
         'genre_silhouette': genre_sil,
-        'better': better
+        'better': better,
+        'top_genres_used': top_genres  # Bonus: For display/debug
     }
     return result

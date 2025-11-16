@@ -12,7 +12,8 @@ import streamlit as st
 from analysis import (SHAP_AVAILABLE, _calculate_surrogate_importance_linear,
                       calculate_cluster_purity_with_majority_genre,
                       calculate_silhouette_score,
-                      compare_silhouette_with_genres, compute_clustering,
+                      compare_silhouette_with_genres,
+                      compare_silhouette_with_top_genres, compute_clustering,
                       compute_dr, get_feature_importance_pca,
                       train_genre_classifier)
 from preprocessing import preprocess_data
@@ -131,7 +132,9 @@ with tab1:
         labels = compute_clustering(X_2d, method=clustering_method, params=params)
         df['cluster'] = labels
 
-    comparison_scores = compare_silhouette_with_genres(X, labels, df)
+    top_genre_comparison = None
+    if clustering_method in ['kmeans', 'agglomerative'] and 'n_clusters' in params:
+        top_genre_comparison = compare_silhouette_with_top_genres(X, labels, df, params['n_clusters'])
 
     sil_score = calculate_silhouette_score(X_2d, labels)
     # Compute cluster purity
@@ -164,6 +167,21 @@ with tab1:
         ]).sort_values("Cluster")
         st.dataframe(cluster_purity_df, use_container_width=True)
     st.markdown("---")
+
+    if top_genre_comparison:
+        st.markdown("### Cluster Quality vs. Top Genres + Other")
+        col_comp1, col_comp2, col_comp3 = st.columns(3)
+        with col_comp1:
+            st.metric("Computed Silhouette", f"{top_genre_comparison['computed_silhouette']:.3f}" if top_genre_comparison['computed_silhouette'] is not None else "N/A")
+        with col_comp2:
+            st.metric("Top-Genre Silhouette", f"{top_genre_comparison['genre_silhouette']:.3f}")
+        with col_comp3:
+            st.metric("Better Separation", top_genre_comparison['better'])
+        st.caption(f"Compares ML clusters to top {len(top_genre_comparison['top_genres_used'])} genres + 'Other'. Higher silhouette = better.")
+        with st.expander("Top Genres Used"):
+            st.write(top_genre_comparison['top_genres_used'])
+    else:
+        st.info("Top-genre comparison available only for KMeans/Agglomerative clustering.")
 
     selected_game_name = st.session_state.get('selected_game', None)
     highlight_name = selected_game_name if selected_game_name else ''
