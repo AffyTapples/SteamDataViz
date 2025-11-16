@@ -165,6 +165,16 @@ with tab1:
         st.dataframe(cluster_purity_df, use_container_width=True)
     st.markdown("---")
 
+    st.markdown("### Cluster Quality vs. Genres")
+    col_comp1, col_comp2, col_comp3 = st.columns(3)
+    with col_comp1:
+        st.metric("Computed Silhouette", f"{comparison_scores['computed_silhouette']:.3f}" if comparison_scores['computed_silhouette'] is not None else "N/A")
+    with col_comp2:
+        st.metric("Genre-Based Silhouette", f"{comparison_scores['genre_silhouette']:.3f}")
+    with col_comp3:
+        st.metric("Better Separation", comparison_scores['better'])
+    st.caption("Higher silhouette = better cluster separation/cohesion. Compares ML clusters to primary genres.")
+
     selected_game_name = st.session_state.get('selected_game', None)
     highlight_name = selected_game_name if selected_game_name else ''
     title = f"{dr_method.upper()} + {clustering_method.upper()}"
