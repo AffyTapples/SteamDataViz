@@ -48,7 +48,7 @@ st.markdown('<p class="sub-header">Discover patterns in your game collection usi
 
 # ----------------- Load data (cached) -----------------
 with st.spinner("Loading & preprocessing data (cached)..."):
-    df, X, feature_names, tfidf, df_genres_onehot, df_tags_onehot = preprocess_data(
+    df, X, X_class, feature_names, class_feature_names, tfidf, df_genres_onehot, df_tags_onehot, df_tags_subcategories_onehot = preprocess_data(
         max_sample=30000, tfidf_max_features=300)
 
 
@@ -111,7 +111,7 @@ with tab1:
     params = {}
     st.sidebar.markdown("### Parameters")
     if clustering_method in ['kmeans','agglomerative']:
-        n_clusters = st.sidebar.slider('Number of clusters (k)',2,20,5)
+        n_clusters = st.sidebar.slider('Number of clusters (k)',10,30,20)
         params['n_clusters'] = n_clusters
     else:
         eps = st.sidebar.slider('DBSCAN eps',0.1,2.0,0.5)
@@ -133,13 +133,13 @@ with tab1:
 
     top_genre_comparison = None
     if clustering_method in ['kmeans', 'agglomerative'] and 'n_clusters' in params:
-        top_genre_comparison = compare_silhouette_with_top_genres(X, labels, df, params['n_clusters'])
+        top_genre_comparison = compare_silhouette_with_top_genres(X_2d, labels, df, params['n_clusters'])
 
 
 
     sil_score = calculate_silhouette_score(X_2d, labels)
     # Compute cluster purity
-    purity_score, cluster_info = calculate_cluster_purity_with_majority_genre(labels, df_genres_onehot, df_tags_onehot)
+    purity_score, cluster_info = calculate_cluster_purity_with_majority_genre(labels, df_genres_onehot, df_tags_onehot, df_tags_subcategories_onehot)
 
     selected_game_name = st.session_state.get('selected_game', None)
     highlight_name = selected_game_name if selected_game_name else ''
@@ -165,10 +165,20 @@ with tab1:
         if cluster_info:
             # Dataframe with styling
             cluster_purity_df = pd.DataFrame([
-                {"Cluster": c, "Purity": info['purity'], "Majority Genre": info['majority_genre'], "Majority Tags": info['majority_tags']}
+                {"Cluster": c, "Purity": info['purity'], "Majority Genre": info['majority_genre'], "Majority Tags": info['majority_tags'], "Majority Tags Subcategories": info['majority_tags_subcategories']}
                 for c, info in cluster_info.items()
             ]).sort_values("Cluster")
             # Style the dataframe (highlight high purity)
+            # Columns to transform
+            cols = ["Majority Genre", "Majority Tags", "Majority Tags Subcategories"]
+            names = ["genres_","top_tags_","tags_subcategories_","subcategories_"]
+            for col in cols:
+                cluster_purity_df[col] = (
+                    cluster_purity_df[col]
+                    .astype(str)
+                    .replace({prefix: '' for prefix in names}, regex=True)  # remove any of the prefixes
+                    .str.replace("_", ", ")  # replace remaining underscores
+                )
             def style_purity(row):
                 color = 'background-color: palegreen' if row['Purity'] > 0.7 else ''
                 return [color] * len(row)
@@ -439,7 +449,7 @@ with tab2:
         if st.button("Analyze Selected Genre", type="primary"):
             with st.spinner(f"Training Random Forest classifier for '{target_genre}'..."):
                 clf, accuracy, precision, recall, feature_importance, test_data = train_genre_classifier(
-                    X, df, target_genre, tuple(feature_names)
+                    X_class, df, target_genre, tuple(class_feature_names)
                 )
                 
                 if clf is None:
@@ -524,7 +534,7 @@ with tab2:
                     st.markdown("### Sub-Genre Clustering")
                     st.markdown(f"Clustering games within '{target_genre_display}' to discover sub-genres")
                     
-                    n_subclusters = st.slider("Number of sub-clusters", min_value=2, max_value=10, value=5,
+                    n_subclusters = st.slider("Number of sub-clusters", min_value=8, max_value=30, value=20,
                                              key="subcluster_slider",
                                              help="Choose the number of sub-genre clusters to find within the selected genre")
                     

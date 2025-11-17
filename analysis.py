@@ -64,7 +64,7 @@ def compute_clustering(embeddings, method='kmeans', params=None):
 
 
 @st.cache_data
-def calculate_cluster_purity_with_majority_genre(labels, df_genres_onehot, df_top_tags_onehot):
+def calculate_cluster_purity_with_majority_genre(labels, df_genres_onehot, df_top_tags_onehot, df_top_tags_subcategories_onehot):
     if df_genres_onehot.empty or df_top_tags_onehot.empty:
         return None, None
     cluster_info = {}
@@ -76,14 +76,17 @@ def calculate_cluster_purity_with_majority_genre(labels, df_genres_onehot, df_to
         idxs = np.where(labels == cluster)[0]
         cluster_genres = df_genres_onehot.iloc[idxs]
         cluster_tags = df_top_tags_onehot.iloc[idxs]
+        cluster_tags_subs = df_top_tags_subcategories_onehot.iloc[idxs]
         if len(idxs) == 0:
             continue
         genre_sums = cluster_genres.sum(axis=0)
         tag_sums = cluster_tags.sum(axis=0)
+        tag_subs_sums = cluster_tags_subs.sum(axis=0)
         majority_genre = genre_sums.idxmax()
         majority_tag = tag_sums.idxmax()
+        majority_tag_subs = tag_subs_sums.idxmax()
         purity = genre_sums.max() / len(idxs)
-        cluster_info[cluster] = {'purity': purity, 'majority_genre': majority_genre, 'majority_tags': majority_tag}
+        cluster_info[cluster] = {'purity': purity, 'majority_genre': majority_genre, 'majority_tags': majority_tag, 'majority_tags_subcategories': majority_tag_subs}
         total_correct += genre_sums.max()
         total_samples += len(idxs)
     purity_score = total_correct / total_samples if total_samples > 0 else None
