@@ -64,7 +64,7 @@ def compute_clustering(embeddings, method='kmeans', params=None):
 
 
 @st.cache_data
-def calculate_cluster_purity_with_majority_genre(labels, df_genres_onehot, df_top_tags_onehot):
+def calculate_cluster_purity_with_majority_genre(labels, df_genres_onehot, df_top_tags_onehot, df_top_tags_subcategories_onehot):
     if df_genres_onehot.empty or df_top_tags_onehot.empty:
         return None, None
     cluster_info = {}
@@ -76,15 +76,18 @@ def calculate_cluster_purity_with_majority_genre(labels, df_genres_onehot, df_to
         idxs = np.where(labels == cluster)[0]
         cluster_genres = df_genres_onehot.iloc[idxs]
         cluster_tags = df_top_tags_onehot.iloc[idxs]
+        cluster_tags_subs = df_top_tags_subcategories_onehot.iloc[idxs]
         if len(idxs) == 0:
             continue
         genre_sums = cluster_genres.sum(axis=0)
         tag_sums = cluster_tags.sum(axis=0)
+        tag_subs_sums = cluster_tags_subs.sum(axis=0)
         majority_genre = genre_sums.idxmax()
         majority_tag = tag_sums.idxmax()
+        majority_tag_subs = tag_subs_sums.idxmax()
         purity = genre_sums.max() / len(idxs)
-        cluster_info[cluster] = {'purity': purity, 'majority_genre': majority_genre, 'majority_tags': majority_tag}
-        total_correct += genre_sums.max()
+        cluster_info[cluster] = {'purity': purity, 'majority_genre': majority_genre, 'majority_tags': majority_tag, 'majority_tags_subcategories': majority_tag_subs}
+        total_correct += tag_sums.max()
         total_samples += len(idxs)
     purity_score = total_correct / total_samples if total_samples > 0 else None
     return purity_score, cluster_info
@@ -196,37 +199,52 @@ def compare_silhouette_with_top_genres(X, computed_labels, df, n_clusters):
     
     # Step 1: Compute silhouette for computed clusters (filter noise)
     valid_idx = computed_labels != -1
+    X_valid = X[valid_idx]
     if np.sum(valid_idx) < 2:
         computed_sil = None
     else:
-        computed_sil = silhouette_score(X[valid_idx], computed_labels[valid_idx])
-    
+        computed_sil = silhouette_score(X_valid, computed_labels[valid_idx])
+    df_local = df.copy()
     # Step 2: Find top (n-1) genres by frequency
-    all_genres = [genre for genres in df['genres'] if isinstance(genres, list) for genre in genres]
+    all_genres = [
+        genre
+        for genres in df_local['genres'] if isinstance(genres, list)
+        for genre in genres
+    ]
     genre_counts = Counter(all_genres)
-    top_genres = [genre for genre, _ in genre_counts.most_common(n_clusters - 1)]
-    top_set = set(top_genres)  # For fast lookup
-    
-    # Step 3: Assign each game to first matching top genre or 'Other'
+    top_genres = [g for g, _ in genre_counts.most_common(n_clusters - 1)]
+    top_set = set(top_genres)
+
+    # assign by highest-frequency genre (better than "first match")
     def assign_genre_cluster(genres):
         if not isinstance(genres, list):
             return 'Other'
-        for genre in genres:
-            if genre in top_set:
-                return genre
-        return 'Other'
+        candidates = [g for g in genres if g in top_set]
+        if not candidates:
+            return 'Other'
+        # pick most common genre among the game’s tags
+        return max(candidates, key=lambda g: genre_counts[g])
     
-    df['genre_cluster'] = df['genres'].apply(assign_genre_cluster)
+    df_local['genre_cluster'] = df_local['genres'].apply(assign_genre_cluster)
+
     
     # Step 4: Encode to numeric labels (including 'Other')
     le = LabelEncoder()
-    genre_labels = le.fit_transform(df['genre_cluster'])
+    genre_labels = le.fit_transform(df_local['genre_cluster'])
     
     # Step 5: Compute silhouette for genre-based labels
-    genre_sil = silhouette_score(X, genre_labels)
+    genre_sil = silhouette_score(X_valid, genre_labels[valid_idx])
     
     # Step 6: Compare and return
-    better = 'Computed' if (computed_sil is not None and computed_sil > genre_sil) else 'Genre-based' if genre_sil > (computed_sil or -float('inf')) else 'Equal'
+    # --- 4. Compare ---
+    if computed_sil is None:
+        better = "Genre-based"
+    elif computed_sil > genre_sil:
+        better = "Computed"
+    elif genre_sil > computed_sil:
+        better = "Genre-based"
+    else:
+        better = "Equal"
     result = {
         'computed_silhouette': computed_sil,
         'genre_silhouette': genre_sil,

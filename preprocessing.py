@@ -131,12 +131,18 @@ def preprocess_data(max_sample=None, tfidf_max_features=300,
         else:
             return [str(x)]
     df['tags_clean'] = df['tags'].apply(normalize_tags)
+    df = df[df['tags_clean'].apply(lambda x: len(x) > 0)]
     df['top_tags'] = df['tags_clean'].apply(top_sorted_tags)
-
+     
     # Filter out adult content & non-ascii names & inactive games
     exclude_keywords = ['mature', 'nudity', 'sexual content']
-    pattern = "|".join(exclude_keywords)
-    df = df[~df['top_tags'].str.lower().str.contains(pattern)]
+
+    df = df[~df['tags_clean'].apply(
+    lambda tags: any(ex_kw in [t.lower() for t in tags] for ex_kw in exclude_keywords)
+    )]
+    df = df[~df['genres'].apply(
+    lambda genres: any(ex_kw in [g.lower() for g in genres] for ex_kw in exclude_keywords)
+    )]
     df.reset_index(drop=True, inplace=True)
     df = df[df['name'].str.match(r'^[A-Za-z0-9\s\-\_\.,!:]+$', na=False)]
     df = df[df['peak_ccu'] > 0]
@@ -193,19 +199,42 @@ def preprocess_data(max_sample=None, tfidf_max_features=300,
         lambda tags: map_to_top20_fallback(tags, top20_tags) or 'Other'
     )
     df_top_tags_onehot = pd.get_dummies(df['top_tags_top20'], prefix='top_tags').astype(np.uint8)
+    
+
+    top_20_tags_list = list({tag for item in top20_tags for tag in item.split('_')})
+    df['tag_subcategories'] = df['tags_clean'].apply(
+        lambda tags: [t for t in tags if t not in top_20_tags_list]
+    )
+    df['top_tags_subcategories'] = df['tag_subcategories'].apply(top_sorted_tags)  
+
+    top_tag_counts_subcat = df['top_tags_subcategories'].value_counts()
+    top20_tags_subcategories = top_tag_counts_subcat.head(20).index
+    df['top_tags_subcategories_top20'] = df['top_tags_subcategories'].apply(lambda x: x if x in top20_tags_subcategories else 'Other')
+    mask_other = df['top_tags_subcategories_top20'] == 'Other'
+    df.loc[mask_other, 'top_tags_subcategories_top20'] = df.loc[mask_other, 'tags_clean'].apply(
+        lambda tags: map_to_top20_fallback(tags, top20_tags_subcategories) or 'Other'
+    )
+    df_top_tags_subcategories_onehot = pd.get_dummies(df['top_tags_subcategories_top20'], prefix='top_tags_subcategories').astype(np.uint8)
 
     # Platforms
-    X_platforms = df[['windows', 'mac', 'linux']].astype(int).values
+    #X_platforms = df[['windows', 'mac', 'linux']].astype(int).values
 
     # Concatenate one-hots
-    onehot_dfs = [df_genres_onehot, df_top_tags_onehot]
+    onehot_dfs = [df_genres_onehot, df_top_tags_onehot, df_top_tags_subcategories_onehot]
     onehot_dfs = [d if isinstance(d, pd.DataFrame) else pd.DataFrame(index=df.index) for d in onehot_dfs]
     X_onehot_df = pd.concat(onehot_dfs, axis=1).fillna(0)
     X_onehot = X_onehot_df.values if not X_onehot_df.empty else np.zeros((len(df), 0))
 
+    class_dfs = [ df_top_tags_onehot, df_top_tags_subcategories_onehot]
+    class_onehot_dfs = [d if isinstance(d, pd.DataFrame) else pd.DataFrame(index=df.index) for d in class_dfs]
+    class_X_onehot_df = pd.concat(class_onehot_dfs, axis=1).fillna(0)
+    class_X_onehot = class_X_onehot_df.values if not class_X_onehot_df.empty else np.zeros((len(df), 0))
     # Final dense matrix (currently only one-hot; numeric & text are commented in original)
     X_dense = np.hstack([X_onehot])
     X_sparse = hstack([csr_matrix(X_dense)])
+
+    x_class_dense = np.hstack([class_X_onehot])
+    X_class_sparse = hstack([csr_matrix(x_class_dense)])
 
     # To dense (with memory fallback)
     try:
@@ -215,16 +244,27 @@ def preprocess_data(max_sample=None, tfidf_max_features=300,
         X = X_sparse[:sample_n].toarray()
         df = df.iloc[:sample_n].reset_index(drop=True)
 
+
+    try:
+        X_class = X_class_sparse.toarray()
+    except MemoryError:
+        sample_n = min(30000, X_class_sparse.shape[0])
+        X_class = X_class_sparse[:sample_n].toarray()
+
+
     df = df.reset_index(drop=True)
     df_genres_onehot = df_genres_onehot.reset_index(drop=True)
     df_top_tags_onehot = df_top_tags_onehot.reset_index(drop=True)
-
+    df_top_tags_subcategories_onehot = df_top_tags_subcategories_onehot.reset_index(drop=True)
     feature_names = list(X_onehot_df.columns)
+    class_feature_names = list(class_X_onehot_df.columns)
 
     if max_sample:
         df = df.head(max_sample)
         df_genres_onehot = df_genres_onehot.head(max_sample)
         df_top_tags_onehot = df_top_tags_onehot.head(max_sample)
+        df_top_tags_subcategories_onehot = df_top_tags_subcategories_onehot.head(max_sample)
         X = X[:max_sample]
+        X_class = X_class[:max_sample]
 
-    return df, X, feature_names, tfidf, df_genres_onehot, df_top_tags_onehot
+    return df, X, X_class, feature_names, class_feature_names, tfidf, df_genres_onehot, df_top_tags_onehot, df_top_tags_subcategories_onehot
