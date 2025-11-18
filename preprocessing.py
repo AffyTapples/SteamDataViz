@@ -138,7 +138,10 @@ def preprocess_data(max_sample=None, tfidf_max_features=300,
     exclude_keywords = ['mature', 'nudity', 'sexual content']
 
     df = df[~df['tags_clean'].apply(
-        lambda tags: any(ex_kw in tags for ex_kw in exclude_keywords)
+    lambda tags: any(ex_kw in [t.lower() for t in tags] for ex_kw in exclude_keywords)
+    )]
+    df = df[~df['genres'].apply(
+    lambda genres: any(ex_kw in [g.lower() for g in genres] for ex_kw in exclude_keywords)
     )]
     df.reset_index(drop=True, inplace=True)
     df = df[df['name'].str.match(r'^[A-Za-z0-9\s\-\_\.,!:]+$', na=False)]

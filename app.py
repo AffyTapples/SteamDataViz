@@ -111,11 +111,11 @@ with tab1:
     params = {}
     st.sidebar.markdown("### Parameters")
     if clustering_method in ['kmeans','agglomerative']:
-        n_clusters = st.sidebar.slider('Number of clusters (k)',10,30,20)
+        n_clusters = st.sidebar.slider('Number of clusters (k)',5,30,20)
         params['n_clusters'] = n_clusters
     else:
         eps = st.sidebar.slider('DBSCAN eps',0.1,2.0,0.5)
-        min_samples = st.sidebar.slider('DBSCAN min_samples',2,20,5)
+        min_samples = st.sidebar.slider('DBSCAN min_samples',20,500,100)
         params['eps'] = eps
         params['min_samples'] = min_samples
 
